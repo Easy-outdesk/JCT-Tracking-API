@@ -2,22 +2,35 @@ using JCT_Tracking_Api.Implementation;
 using JCT_Tracking_Api.Interface;
 using JCT_Tracking_Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.DataProtection.Repositories;
-using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using System;
+using Serilog;
+using System.Net;
 using System.Text;
-using System.Text.Json;
 using Vessel_Tracking_Api.Enitity_Framework;
 using Vessel_Tracking_Api.Middleware;
 using Vessel_Tracking_Api.Models;
 using Vessel_Tracking_Api.Services;
 
+
+
+
 var builder = WebApplication.CreateBuilder(args);
+
+ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+Log.Logger = new LoggerConfiguration()
+    .WriteTo.File(
+        "Logs/log-.txt",
+        rollingInterval: RollingInterval.Day,
+        retainedFileCountLimit: 20
+    )
+    .CreateLogger();
+
+builder.Host.UseSerilog();
 
 // Add services to the container.
 
@@ -64,7 +77,6 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 });
-
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -86,6 +98,49 @@ builder.Services.AddAuthentication(options =>
 
         IssuerSigningKey = new SymmetricSecurityKey(key),
         ClockSkew = TimeSpan.Zero
+    };
+
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = async context =>
+        {
+            context.Response.ContentType = "application/json";
+
+            string message = "Token invalid.";
+
+            if (context.Exception is SecurityTokenExpiredException)
+            {
+                message = "Token expired.";
+            }
+
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                success = false,
+                message = message,
+                data = (object)null
+            });
+        },
+
+        OnChallenge = async context =>
+        {
+            context.HandleResponse(); // prevent default 401 response
+
+            context.Response.ContentType = "application/json";
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+
+            // Only send message if no response has been written
+            if (!context.Response.HasStarted)
+            {
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    success = false,
+                    message = "Authentication failed.",
+                    data = (object)null
+                });
+            }
+        }
     };
 });
 
@@ -122,8 +177,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
-
 app.UseMiddleware<ApiKeyMiddleware>();
 
 app.UseMiddleware<GlobalExceptionMiddleware>();
@@ -133,6 +186,8 @@ app.UseRateLimiter();
 app.UseAuthentication();
 
 app.UseAuthorization();
+
+app.UseHttpsRedirection();
 
 app.MapControllers().RequireRateLimiting("ApiPolicy");
 

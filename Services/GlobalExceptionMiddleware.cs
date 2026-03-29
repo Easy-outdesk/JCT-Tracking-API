@@ -21,35 +21,54 @@ namespace JCT_Tracking_Api.Services
             }
             catch (ValidationException ex)
             {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+                LogError(context, ex, "Validation Error");
+                await HandleException(context, StatusCodes.Status400BadRequest, ex.Message);
             }
             catch (UnauthorizedException ex)
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+                LogError(context, ex, "Unauthorized Error");
+                await HandleException(context, StatusCodes.Status401Unauthorized, ex.Message);
             }
             catch (ForbiddenException ex)
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+                LogError(context, ex, "Forbidden Error");
+                await HandleException(context, StatusCodes.Status403Forbidden, ex.Message);
             }
             catch (NotFoundException ex)
             {
-                context.Response.StatusCode = StatusCodes.Status404NotFound;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new { message = ex.Message });
+                LogError(context, ex, "Not Found Error");
+                await HandleException(context, StatusCodes.Status404NotFound, ex.Message);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Unhandled exception");
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsJsonAsync(new { message = "An unexpected error occurred." });
+                LogError(context, ex, "Unhandled Exception");
+                await HandleException(context, StatusCodes.Status500InternalServerError, "Internal Server Error.");
             }
+        }
+
+        private void LogError(HttpContext context, Exception ex, string message)
+        {
+            var endpoint = context.GetEndpoint()?.DisplayName;
+
+            _logger.LogError(ex,
+                "{Message}. Method: {Method}, Path: {Path}, Endpoint: {Endpoint}",
+                message,
+                context.Request.Method,
+                context.Request.Path,
+                endpoint);
+        }
+
+        private static async Task HandleException(HttpContext context, int statusCode, string message)
+        {
+            context.Response.StatusCode = statusCode;
+            context.Response.ContentType = "application/json";
+
+            await context.Response.WriteAsJsonAsync(new
+            {
+                success = false,
+                message = message,
+                data = (object)null
+            });
         }
     }
 }

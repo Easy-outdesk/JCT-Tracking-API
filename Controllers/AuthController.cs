@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using JCT_Tracking_Api.Models;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -18,11 +19,13 @@ namespace Vessel_Tracking_Api.Controllers
     {
         private readonly IConfiguration _config;
         private readonly JwtService _jwtService;
+        private readonly ILogger<AuthController> _logger;
 
-        public AuthController(IConfiguration config, JwtService jwtService)
+        public AuthController(IConfiguration config, JwtService jwtService, ILogger<AuthController> logger)
         {
             _config = config;
             _jwtService = jwtService;
+            _logger = logger;
         }
 
 
@@ -47,33 +50,54 @@ namespace Vessel_Tracking_Api.Controllers
         /// <response code="200">Token successfully generated.</response>
         /// <response code="401">Invalid username or password.</response>
         
-        [HttpPost("token")]
+        [HttpPost("shipmentAccessKey")]
         [EnableRateLimiting("ApiPolicy")]
-        [HttpPost]
         public IActionResult GetToken([FromBody] TokenRequest request)
         {
-            // Get the list of valid API users from configuration
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+            var userAgent = HttpContext.Request.Headers["User-Agent"].ToString();
+            var requestedUrl = $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host}{HttpContext.Request.Path}{HttpContext.Request.QueryString}";
+
+            _logger.LogInformation(
+                "GetToken request received. IP: {IP}, User-Agent: {UA}, URL: {URL}, Username: {Username}",
+                ipAddress, userAgent, requestedUrl, request?.Username
+            );
+
+            //string hash = BCrypt.Net.BCrypt.HashPassword("Saudi2026@psa%!");
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Username) ||
+                string.IsNullOrWhiteSpace(request.Password))
+            {
+                _logger.LogWarning("GetToken failed: Username or password not provided. IP: {IP}", ipAddress);
+                throw new ValidationException("Username and password are required.");
+            }
+
             var users = _config.GetSection("ApiUsers").Get<List<ApiUser>>();
 
-            var user = users.FirstOrDefault(u =>
-                u.Username == request.Username &&
-                u.Password == request.Password);
+            var user = users?.FirstOrDefault(u => u.Username == request.Username);
 
-            if (user == null)
-                return Unauthorized("Invalid credentials");
+            if (user == null || !BCrypt.Net.BCrypt.Verify(request.Password, user.Password))
+            {
+                _logger.LogWarning("GetToken failed: Invalid credentials for Username: {Username} from IP: {IP}", request.Username, ipAddress);
+                throw new UnauthorizedException("Invalid credentials.");
+            }
 
-            // Read TokenExpiryMinutes from configuration
             int tokenExpiryMinutes = _config.GetValue<int>("ApiSecurity:TokenExpiryMinutes");
 
-            // Generate the JWT token (your service should already use this expiry)
             var token = _jwtService.GenerateToken(user.Username, tokenExpiryMinutes);
 
-            // Return token response
+            _logger.LogInformation("Token generated successfully for Username: {Username} from IP: {IP}", request.Username, ipAddress);
+
             return Ok(new
             {
-                access_token = token,
-                token_type = "Bearer",
-                expires_in = tokenExpiryMinutes * 60 
+                success = true,
+                message = "Token generated successfully",
+                data = new
+                {
+                    access_token = token,
+                    token_type = "Bearer",
+                    expires_in = tokenExpiryMinutes * 60
+                }
             });
         }
     }

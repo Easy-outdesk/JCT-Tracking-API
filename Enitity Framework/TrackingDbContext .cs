@@ -1,5 +1,6 @@
 ﻿using JCT_Tracking_Api.Models;
 using Microsoft.EntityFrameworkCore;
+using System.ComponentModel;
 using Vessel_Tracking_Api.Models;
 
 namespace Vessel_Tracking_Api.Enitity_Framework
@@ -15,20 +16,34 @@ public class TrackingDbContext : DbContext
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            // VesselSchedule view
             modelBuilder.Entity<VesselSchedule>()
                 .HasNoKey()
-                .ToView("NCT_VIEW_WEB_VESSEL_INFO", "tos_usr");
+                .ToView("NCT_VIEW_WEB_VESSEL_INFO", "TOS_USR");
 
-            modelBuilder.Entity<BlDetail>()
-                 .HasKey(b => b.BL_KEY);
+            // ContainerDetail view
+            modelBuilder.Entity<ContainerDetail>(entity =>
+            {
+                entity.ToView("NCT_VIEW_WEB_CONTAINER_INFO", "TOS_USR");
+
+                entity.HasKey(e => new { e.CONTAINER_NUMBER, e.BL_NBR });
+
+                entity.HasOne(c => c.BLDetail)
+                      .WithMany(b => b.Containers)
+                      .HasForeignKey(c => c.BL_NBR)
+                      .HasPrincipalKey(b => b.BL_KEY);
+            });
+
+            // BlDetail view
+            modelBuilder.Entity<BlDetail>(entity =>
+            {
+                entity.ToView("NCT_MOBAPP_BL_DETAIL_VW", "TOS_USR");
+                entity.HasKey(b => b.BL_KEY);
+            });
 
             modelBuilder.Entity<ContainerDetail>()
-                .HasKey(c => new { c.CONTAINER_NBR, c.BL_KEY });
-
-            modelBuilder.Entity<BlDetail>()
-                .HasMany(b => b.Containers)
-                .WithOne(c => c.BLDetail)
-                .HasForeignKey(c => c.BL_KEY);
+            .Property(c => c.TARE_WEIGHT)
+            .HasPrecision(18, 3);
         }
     }
 }
